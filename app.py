@@ -39,6 +39,8 @@ if get_script_run_ctx() is None:
 # Project paths: the script sits in the app root, and the pretrained models are stored
 # in the dedicated `model/` directory. The target column is fixed for this dataset.
 BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
 MODEL_DIR = BASE_DIR / "model"
 TARGET_COLUMN = "target"
 
@@ -91,7 +93,7 @@ def load_model(model_path):
 # manually preparing a new dataset.
 if uploaded_file is None:
     st.subheader("Try the supplied test dataset")
-    default_path = BASE_DIR / "test_data.csv"
+    default_path = DATA_DIR / "test_data.csv"
     if default_path.exists():
         st.download_button(
             "Download sample test_data.csv",
@@ -129,7 +131,7 @@ model = load_model(model_path)
 expected_features = list(getattr(model, "feature_names_in_", []))
 if not expected_features:
     # Pipelines and estimators trained with DataFrames usually expose feature_names_in_.
-    expected_features = list(pd.read_csv(BASE_DIR / "test_data.csv", nrows=1).drop(columns=[TARGET_COLUMN]).columns)
+    expected_features = list(pd.read_csv(DATA_DIR / "test_data.csv", nrows=1).drop(columns=[TARGET_COLUMN]).columns)
 
 # This schema check makes sure the uploaded CSV uses the same columns as the model expects.
 # Extra columns are ignored, while missing required feature columns stop the evaluation.
