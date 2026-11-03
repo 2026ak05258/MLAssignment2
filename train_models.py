@@ -36,6 +36,8 @@ from sklearn.metrics import (
 # Project root and model output folder. The script creates the model directory if it
 # does not already exist so all serialized artifacts are written in a predictable place.
 ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+DATA_DIR.mkdir(exist_ok=True)
 (ROOT / "model").mkdir(exist_ok=True)
 
 # Load the built-in breast cancer dataset from scikit-learn. It is already a clean,
@@ -106,16 +108,16 @@ for name, model in models.items():
 # target values. This file is used by the app as the default sample dataset for evaluation.
 test_df = X_test.copy()
 test_df["target"] = y_test
-test_df.to_csv(ROOT / "test_data.csv", index=False)
+test_df.to_csv(DATA_DIR / "test_data.csv", index=False)
 
 # Export the full dataset with labels to support transparency and reproducibility.
 full_df = X.copy()
 full_df["target"] = y
-full_df.to_csv(ROOT / "breast_cancer_dataset.csv", index=False)
+full_df.to_csv(DATA_DIR / "breast_cancer_dataset.csv", index=False)
 
 # Save the metric comparison table to CSV for easy reading in Excel or GitHub review.
 metrics_df = pd.DataFrame(rows)
-metrics_df.to_csv(ROOT / "model_comparison_metrics.csv", index=False)
+metrics_df.to_csv(DATA_DIR / "model_comparison_metrics.csv", index=False)
 
 # Print the final metrics table to the terminal for quick visual inspection during training.
 print(metrics_df.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
