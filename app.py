@@ -8,15 +8,7 @@ Usage:
     streamlit run app.py
 """
 
-import io
-import logging
 from pathlib import Path
-
-# The script is designed to run only inside the Streamlit runtime. When it is launched
-# with plain Python instead of `streamlit run`, Streamlit emits a noisy warning about a
-# missing ScriptRunContext. This logger is lowered so that the app can fail gracefully with
-# a clear, user-friendly message instead of dumping repeated warnings.
-logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(logging.CRITICAL)
 
 # Core libraries required for loading models, reading CSV files, and building the UI.
 # `joblib` is used because the trained scikit-learn models were serialized with it.
@@ -30,14 +22,13 @@ from sklearn.metrics import (
     f1_score, matthews_corrcoef, confusion_matrix, classification_report
 )
 
-# The app must be started through Streamlit; otherwise there is no browser session and
-# the widgets cannot be initialized properly. This guard prevents confusing NameError
-# crashes caused by undefined variables during bare-mode execution.
+# The app must be started through Streamlit.
 if get_script_run_ctx() is None:
     raise SystemExit("This app must be run with 'streamlit run app.py'.")
 
-# Project paths: the script sits in the app root, and the pretrained models are stored
-# in the dedicated `model/` directory. The target column is fixed for this dataset.
+# Project paths: the script sits in the app root, pretrained models are stored in the
+# dedicated `model/` directory, and the generated sample/test CSVs live in `data/`.
+# The target column is fixed for this dataset and is used for supervised evaluation.
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -57,9 +48,13 @@ MODEL_FILES = {
 
 # Configure the app page title, icon, and layout so the interface is polished and
 # consistent with a dashboard-style ML comparison tool.
-st.set_page_config(page_title="ML Classifier Lab", page_icon="🧪", layout="wide")
-st.title("🧪 Machine Learning Classifier Lab")
-st.caption("Compare five saved classification models on an uploaded, labelled test CSV.")
+st.set_page_config(
+    page_title="Breast Cancer Model Comparison",
+    page_icon="📊",
+    layout="wide",
+)
+st.title("Breast Cancer Diagnostic Classifier Comparison")
+st.caption("Compare five trained classification models on a labelled test dataset.")
 
 with st.sidebar:
     st.header("Evaluation settings")
@@ -73,9 +68,11 @@ with st.sidebar:
 
 st.markdown(
     """
-    This application evaluates pretrained models. It **does not retrain** models on uploaded data.
+    This application evaluates pretrained models.
     Dataset: Breast Cancer Wisconsin (Diagnostic), a binary classification dataset with 30 numeric features.
-    Target labels: `0 = malignant`, `1 = benign`.
+    The five classifiers were trained on the same training split and saved to disk. 
+    This app loads one of the models, validates the uploaded CSV schema, computes standard classification metrics, 
+    and displays the confusion matrix and classification report.
     """
 )
 
@@ -92,7 +89,7 @@ def load_model(model_path):
 # This is helpful for demonstration purposes and ensures the app can be explored without
 # manually preparing a new dataset.
 if uploaded_file is None:
-    st.subheader("Try the supplied test dataset")
+    st.subheader("Use Sample Test Dataset")
     default_path = DATA_DIR / "test_data.csv"
     if default_path.exists():
         st.download_button(
