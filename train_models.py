@@ -33,91 +33,100 @@ from sklearn.metrics import (
     matthews_corrcoef,
 )
 
-# Project root and model output folder. The script creates the model directory if it
-# does not already exist so all serialized artifacts are written in a predictable place.
+# Keep path definitions free of side effects; only main() writes output files.
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
-(ROOT / "model").mkdir(exist_ok=True)
+MODEL_DIR = ROOT / "model"
 
-# Load the built-in breast cancer dataset from scikit-learn. It is already a clean,
-# labelled binary classification dataset with 30 numeric features and a target column.
-data = load_breast_cancer(as_frame=True)
-X, y = data.data, data.target
 
-# Create a stratified train-test split so the model evaluation is representative and
-# both classes are preserved in the held-out set.
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.25,
-    random_state=42,
-    stratify=y,
-)
+def main():
+    """Train five classifiers, evaluate the held-out split, and export artifacts.
 
-# Define the five classifiers used in the assignment. Some use pipelines with scaling,
-# while the decision tree is intentionally left unscaled to reflect a simple baseline.
-models = {
-    "Logistic Regression": Pipeline([
-        ("scaler", StandardScaler()),
-        ("classifier", LogisticRegression(max_iter=3000, random_state=42)),
-    ]),
-    "Decision Tree": DecisionTreeClassifier(random_state=42, max_depth=5, min_samples_leaf=3),
-    "KNN": Pipeline([
-        ("scaler", StandardScaler()),
-        ("classifier", KNeighborsClassifier(n_neighbors=5)),
-    ]),
-    "Naive Bayes": Pipeline([
-        ("scaler", StandardScaler()),
-        ("classifier", GaussianNB()),
-    ]),
-    "Support Vector Machine": Pipeline([
-        ("scaler", StandardScaler()),
-        ("classifier", SVC(probability=True, random_state=42, kernel="rbf")),
-    ]),
-}
+    Takes no arguments and returns None. Creates model/ and data/ if needed,
+    writes one joblib artifact per model, and exports test_data.csv,
+    breast_cancer_dataset.csv, and model_comparison_metrics.csv under data/.
+    The comparison table is also printed to standard output.
 
-# Train each model, save it to disk, compute evaluation metrics on the held-out test set,
-# and collect the results in a list that will later be exported as CSV.
-rows = []
-for name, model in models.items():
-    # Fit the model on the training split only.
-    model.fit(X_train, y_train)
+    Existing output files are overwritten. Training, evaluation, and file I/O
+    errors propagate to the caller; earlier writes are not rolled back if a
+    later operation fails. Retraining is not required to launch the app when
+    compatible saved artifacts are already available.
+    """
+    DATA_DIR.mkdir(exist_ok=True)
+    MODEL_DIR.mkdir(exist_ok=True)
 
-    # Persist the fully trained estimator so the Streamlit app can load it later without
-    # retraining or exposing the training pipeline to end users.
-    output_name = name.lower().replace(" ", "_") + ".joblib"
-    joblib.dump(model, ROOT / "model" / output_name)
+    # Load the clean, labelled dataset with its original feature names.
+    X, y = load_breast_cancer(as_frame=True, return_X_y=True)
+    # Use the same 426 training / 143 test samples for every model. Stratification
+    # preserves the class balance; a fixed seed makes the split reproducible.
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.25,
+        random_state=42,
+        stratify=y,
+    )
 
-    # Generate predictions and the positive-class probability scores needed for AUC.
-    pred = model.predict(X_test)
-    score = model.predict_proba(X_test)[:, 1]
+    # Scaling is fitted on training data only, as part of each pipeline, preventing
+    # test-data leakage. The decision tree uses the unscaled numeric features.
+    models = {
+        "Logistic Regression": Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", LogisticRegression(max_iter=3000, random_state=42)),
+        ]),
+        "Decision Tree": DecisionTreeClassifier(random_state=42, max_depth=5, min_samples_leaf=3),
+        "KNN": Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", KNeighborsClassifier(n_neighbors=5)),
+        ]),
+        "Naive Bayes": Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", GaussianNB()),
+        ]),
+        "Support Vector Machine": Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", SVC(probability=True, random_state=42, kernel="rbf")),
+        ]),
+    }
 
-    # Store all key classification metrics for later comparison and reporting.
-    rows.append({
-        "ML Model Name": name,
-        "Accuracy": accuracy_score(y_test, pred),
-        "AUC": roc_auc_score(y_test, score),
-        "Precision": precision_score(y_test, pred, zero_division=0),
-        "Recall": recall_score(y_test, pred, zero_division=0),
-        "F1": f1_score(y_test, pred, zero_division=0),
-        "MCC": matthews_corrcoef(y_test, pred),
-    })
+    rows = []
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        pred = model.predict(X_test)
+        # Class 1 is benign; locate its probability column explicitly.
+        positive_index = list(model.classes_).index(1)
+        score = model.predict_proba(X_test)[:, positive_index]
+        rows.append({
+            "ML Model Name": name,
+            "Accuracy": accuracy_score(y_test, pred),
+            "AUC": roc_auc_score(y_test, score),
+            "Precision": precision_score(y_test, pred, zero_division=0),
+            "Recall": recall_score(y_test, pred, zero_division=0),
+            "F1": f1_score(y_test, pred, zero_division=0),
+            "MCC": matthews_corrcoef(y_test, pred),
+        })
 
-# Export the held-out test split as a CSV that includes the feature columns and the true
-# target values. This file is used by the app as the default sample dataset for evaluation.
-test_df = X_test.copy()
-test_df["target"] = y_test
-test_df.to_csv(DATA_DIR / "test_data.csv", index=False)
+        # Keep these filenames consistent with MODEL_FILES in app.py. Serializing
+        # the whole pipeline retains its fitted preprocessing for later inference.
+        output_name = name.lower().replace(" ", "_") + ".joblib"
+        joblib.dump(model, MODEL_DIR / output_name)
 
-# Export the full dataset with labels to support transparency and reproducibility.
-full_df = X.copy()
-full_df["target"] = y
-full_df.to_csv(DATA_DIR / "breast_cancer_dataset.csv", index=False)
+    # Preserve index alignment between the features and their true labels.
+    test_df = X_test.copy()
+    test_df["target"] = y_test
+    test_df.to_csv(DATA_DIR / "test_data.csv", index=False)
 
-# Save the metric comparison table to CSV for easy reading in Excel or GitHub review.
-metrics_df = pd.DataFrame(rows)
-metrics_df.to_csv(DATA_DIR / "model_comparison_metrics.csv", index=False)
+    # The full dataset includes training rows: this export is for reference, not
+    # an independent test set for measuring generalization performance.
+    full_df = X.copy()
+    full_df["target"] = y
+    full_df.to_csv(DATA_DIR / "breast_cancer_dataset.csv", index=False)
 
-# Print the final metrics table to the terminal for quick visual inspection during training.
-print(metrics_df.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+    # Export unrounded metric values; round only the human-readable console view.
+    metrics_df = pd.DataFrame(rows)
+    metrics_df.to_csv(DATA_DIR / "model_comparison_metrics.csv", index=False)
+    print(metrics_df.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+
+
+if __name__ == "__main__":
+    main()
